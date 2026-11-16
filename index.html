@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xme — Насколько хорошо ты меня знаешь?</title>
+    
+    <!-- Supabase CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --primary-gradient: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+            --text-main: #ffffff;
+            --text-muted: #9ca3af;
+            --success: #10b981;
+            --error: #ef4444;
+            --danger: #dc2626;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Background Orbs */
+        .bg-orbs { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+        .orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.4; animation: float 10s infinite ease-in-out alternate; }
+        .orb-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: #a855f7; }
+        .orb-2 { bottom: -10%; right: -10%; width: 40vw; height: 40vw; background: #3b82f6; animation-delay: -5s; }
+        @keyframes float { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(30px, 50px) scale(1.1); } }
+
+        header {
+            padding: 20px; text-align: center; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .logo-container h1 {
+            font-size: 2rem; font-weight: 800; letter-spacing: -1px;
+            background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+        .badge {
+            font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);
+            border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 12px; margin-left: 10px; vertical-align: middle;
+        }
+
+        main { flex: 1; display: flex; justify-content: center; align-items: flex-start; padding: 20px; width: 100%; max-width: 700px; margin: 0 auto; }
+
+        .glass-card {
+            background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 24px;
+            padding: 30px; width: 100%; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(12px); transition: all 0.3s ease; animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        h2 { margin-bottom: 20px; font-size: 1.5rem; text-align: center; }
+        p.subtitle { color: var(--text-muted); text-align: center; margin-bottom: 25px; font-size: 0.9rem; }
+
+        /* Inputs & Buttons */
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: var(--text-muted); }
+        input[type="text"], input[type="password"], textarea {
+            width: 100%; padding: 12px 15px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color);
+            border-radius: 12px; color: white; font-size: 1rem; outline: none; transition: 0.2s; resize: vertical;
+        }
+        input:focus, textarea:focus { border-color: #a855f7; box-shadow: 0 0 10px rgba(168, 85, 247, 0.2); }
+
+        .btn {
+            width: 100%; padding: 14px; border: none; border-radius: 12px; font-weight: 600; cursor: pointer;
+            transition: 0.2s; font-size: 1rem; margin-top: 10px; display: flex; justify-content: center; align-items: center; gap: 8px;
+        }
+        .btn-primary { background: var(--primary-gradient); color: white; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3); }
+        .btn-primary:hover { transform: translateY(-2px); }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--border-color); }
+        .btn-danger { background: rgba(220, 38, 38, 0.2); color: #ef4444; border: 1px solid rgba(220, 38, 38, 0.3); }
+        .btn-small { width: auto; padding: 8px 16px; font-size: 0.9rem; margin: 5px; }
+
+        /* Constructor Styles */
+        .question-builder { margin-top: 20px; border-top: 1px dashed var(--border-color); padding-top: 20px; }
+        .q-item { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid var(--border-color); }
+        .option-row { display: flex; gap: 10px; margin-top: 8px; align-items: center; }
+        .option-input { flex: 1; padding: 8px !important; font-size: 0.9rem !important; }
+        .remove-opt-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 0 5px; }
+        
+        /* Quiz Options Display */
+        .options-grid { display: grid; gap: 10px; margin-top: 20px; }
+        .option-btn {
+            background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 15px;
+            border-radius: 12px; text-align: left; color: white; cursor: pointer; transition: 0.2s;
+            display: flex; align-items: center; gap: 10px; font-size: 0.95rem;
+        }
+        .option-btn:hover { background: rgba(255,255,255,0.1); border-color: #a855f7; }
+        .option-btn.selected { background: rgba(168, 85, 247, 0.2); border-color: #a855f7; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
+
+        /* Progress Bar */
+        .progress-container { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-bottom: 20px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--primary-gradient); width: 0%; transition: width 0.3s ease; }
+
+        /* Results List */
+        .result-item {
+            background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; margin-bottom: 10px;
+            display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border-color);
+        }
+        .friend-info { display: flex; flex-direction: column; }
+        .friend-name { font-weight: bold; font-size: 1.1rem; }
+        .score-text { font-size: 0.85rem; color: var(--text-muted); }
+        .mini-progress { width: 100px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+        .mini-fill { height: 100%; background: var(--success); }
+
+        /* Toast */
+        #toast {
+            visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center;
+            border-radius: 8px; padding: 16px; position: fixed; z-index: 1000; bottom: 30px; left: 50%; transform: translateX(-50%);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1);
+        }
+        #toast.show { visibility: visible; animation: fadein 0.5s, fadeout 0.5s 2.5s; }
+        @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
+        @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+
+        footer { text-align: center; padding: 20px; font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-color); }
+        footer a { color: #a855f7; text-decoration: none; }
+        .hidden { display: none !important; }
+        .link-box {
+            background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; word-break: break-all;
+            border: 1px dashed var(--border-color); margin: 15px 0; font-family: monospace; font-size: 0.85rem; color: #ccc;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+    </div>
+
+    <header>
+        <div class="logo-container">
+            <h1>Xme</h1>
+            <span class="badge">by Xcortex Entertainment</span>
+        </div>
+    </header>
+
+    <main id="app"></main>
+
+    <footer>
+        <p>&copy; 2026 Xcortex. Все права защищены.</p>
+        <button class="btn btn-secondary" style="margin-top:10px; width:auto;" onclick="location.reload()">На главную</button>
+    </footer>
+
+    <div id="toast">Сообщение</div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SUPABASE_URL = 'https://epklfzbvlqzarptpwsdn.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_aa5ojwVrZ7pfLE0ec0DV5w_p3Zk2fcn';
+        
+        let supabaseClient;
+        try {
+            supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+            console.log("✅ Supabase Connected");
+        } catch (e) {
+            alert("Ошибка подключения Supabase. Проверь ключи.");
+        }
+
+        // --- STATE ---
+        let state = {
+            mode: 'landing',
+            currentUserNick: null,
+            currentTestId: null,
+            creatorPin: null,
+            tempQuestions: [], // Массив для конструктора
+            activeQuestionIndex: 0,
+            userAnswers: {},   // Ответы при прохождении
+            authorAnswers: []  // Правильные ответы автора (индексы)
+        };
+
+        const appContainer = document.getElementById('app');
+
+        // --- HELPERS ---
+        function showToast(msg) {
+            const t = document.getElementById("toast");
+            t.innerText = msg;
+            t.className = "show";
+            setTimeout(() => { t.className = t.className.replace("show", ""); }, 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // --- RENDER LANDING ---
+        function renderLanding() {
+            appContainer.innerHTML = `
+                <div class="glass-card">
+                    <h2>Добро пожаловать в Xme!</h2>
+                    <p class="subtitle">Создай свой уникальный тест или пройди чужой.</p>
+                    
+                    <div class="input-group">
+                        <label>Твой никнейм</label>
+                        <input type="text" id="login-nick" placeholder="Например: Artem_X" maxlength="20">
+                    </div>
+                    <div class="input-group">
+                        <label>PIN-код (4 цифры)</label>
+                        <input type="password" id="login-pin" placeholder="****" pattern="[0-9]{4}" maxlength="4">
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="checkLoginOrCreate()">Войти / Создать тест</button>
+                </div>
+            `;
+        }
+
+        async function checkLoginOrCreate() {
+    const nick = document.getElementById('login-nick').value.trim();
+    const pin = document.getElementById('login-pin').value.trim();
+
+    if (!nick || !pin || pin.length !== 4) {
+        showToast("Заполните все поля корректно");
+        return;
+    }
+
+    try {
+        // Используем select().eq(), но НЕ .single(). Получаем массив.
+        const { data, error } = await supabaseClient
+            .from('xme_tests')
+            .select('*')
+            .eq('creator_nick', nick); 
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            // Пользователь найден
+            const user = data[0];
+            if (user.secret_pin === pin) {
+                state.currentTestId = user.id;
+                // Сохраняем структуру вопросов для сравнения позже
+                state.authorQuestions = user.questions_data; 
+                renderDashboard(user.id);
+            } else {
+                showToast("Неверный PIN!");
+            }
+        } else {
+            // Пользователя нет -> Начинаем создание
+            state.currentUserNick = nick;
+            state.creatorPin = pin;
+            state.tempQuestions = [];
+            renderBuilderStep(0);
+        }
+    } catch (err) {
+        console.error("Full Error:", err);
+        // Если ошибка сети или другая, показываем текст
+        showToast("Ошибка БД: " + (err.message || "Unknown"));
+    }
+}
+        // --- BUILDER LOGIC (Constructor) ---
+        function renderBuilderStep(index) {
+            state.activeQuestionIndex = index;
+            
+            // Initialize new question object if doesn't exist
+            if (!state.tempQuestions[index]) {
+                state.tempQuestions[index] = {
+                    text: "",
+                    options: [{ text: "", isCorrect: false }, { text: "", isCorrect: false }], // Min 2 options initially
+                    correctIndex: 0
+                };
+            }
+            const q = state.tempQuestions[index];
+
+            let optionsHtml = '';
+            q.options.forEach((opt, i) => {
+                const checkedAttr = opt.isCorrect ? 'checked' : '';
+                optionsHtml += `
+                    <div class="option-row">
+                        <input type="radio" name="correct_opt_${index}" value="${i}" ${checkedAttr} onchange="setCorrectOption(${index}, ${i})">
+                        <input type="text" class="option-input" placeholder="Вариант ответа..." value="${escapeHtml(opt.text)}" oninput="updateOptionText(${index}, ${i}, this.value)">
+                        <button class="remove-opt-btn" onclick="removeOption(${index}, ${i})">×</button>
+                    </div>
+                `;
+            });
+
+            appContainer.innerHTML = `
+                <div class="glass-card">
+                    <h2>Конструктор Вопроса ${index + 1}</h2>
+                    <p class="subtitle">Максимум 15 вопросов. Отметьте правильный ответ галочкой.</p>
+                    
+                    <div class="input-group">
+                        <label>Текст вопроса</label>
+                        <textarea rows="2" placeholder="Напр: Какая моя любимая игра?" oninput="updateQuestionText(${index}, this.value)">${escapeHtml(q.text)}</textarea>
+                    </div>
+
+                    <div class="question-builder">
+                        <label style="margin-bottom:10px;">Варианты ответов:</label>
+                        ${optionsHtml}
+                        <button class="btn btn-secondary btn-small" onclick="addOption(${index})">+ Добавить вариант</button>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:20px;">
+                        ${index > 0 ? `<button class="btn btn-secondary" onclick="renderBuilderStep(${index - 1})">← Назад</button>` : ''}
+                        <button class="btn btn-primary" onclick="nextBuilderStep()" style="flex:1;">${index === 14 ? 'Завершить' : 'Далее →'}</button>
+                    </div>
+                     <button class="btn btn-danger" style="margin-top:10px;" onclick="finishBuilderEarly()">Закончить сейчас (${index + 1} вопр.)</button>
+                </div>
+            `;
+        }
+
+        window.updateQuestionText = (idx, val) => { state.tempQuestions[idx].text = val; };
+        window.updateOptionText = (idx, optIdx, val) => { state.tempQuestions[idx].options[optIdx].text = val; };
+        window.setCorrectOption = (idx, optIdx) => {
+            state.tempQuestions[idx].options.forEach(o => o.isCorrect = false);
+            state.tempQuestions[idx].options[optIdx].isCorrect = true;
+            state.tempQuestions[idx].correctIndex = optIdx;
+        };
+        window.addOption = (idx) => {
+            if(state.tempQuestions[idx].options.length >= 5) {
+                showToast("Максимум 5 вариантов");
+                return;
+            }
+            state.tempQuestions[idx].options.push({ text: "", isCorrect: false });
+            renderBuilderStep(idx);
+        };
+        window.removeOption = (idx, optIdx) => {
+            if(state.tempQuestions[idx].options.length <= 2) {
+                showToast("Минимум 2 варианта");
+                return;
+            }
+            state.tempQuestions[idx].options.splice(optIdx, 1);
+            // Recalculate correct index if removed
+            if(state.tempQuestions[idx].correctIndex === optIdx) {
+                state.tempQuestions[idx].correctIndex = 0;
+                state.tempQuestions[idx].options[0].isCorrect = true;
+            } else if (state.tempQuestions[idx].correctIndex > optIdx) {
+                state.tempQuestions[idx].correctIndex--;
+            }
+            renderBuilderStep(idx);
+        };
+
+        window.nextBuilderStep = () => {
+            const q = state.tempQuestions[state.activeQuestionIndex];
+            if(!q.text.trim()) { showToast("Введите вопрос"); return; }
+            if(q.options.some(o => !o.text.trim())) { showToast("Заполните все варианты"); return; }
+            
+            if (state.activeQuestionIndex < 14) {
+                renderBuilderStep(state.activeQuestionIndex + 1);
+            } else {
+                finishBuilder();
+            }
+        };
+
+        window.finishBuilderEarly = () => {
+             if(confirm(`Вы уверены? Будет сохранено только ${state.activeQuestionIndex + 1} вопросов.`)) {
+                 finishBuilder();
+             }
+        };
+
+        async function finishBuilder() {
+            // Validate final list
+            const validQuestions = state.tempQuestions.filter(q => q.text && q.options.length > 0);
+            if(validQuestions.length === 0) { showToast("Нет вопросов!"); return; }
+
+            try {
+                const { data, error } = await supabaseClient
+                    .from('xme_tests')
+                    .insert([{
+                        creator_nick: state.currentUserNick,
+                        secret_pin: state.creatorPin,
+                        questions_data: validQuestions
+                    }])
+                    .select()
+                    .single();
+
+                if (error) throw error;
+                
+                showToast("Тест создан!");
+                state.currentTestId = data.id;
+                renderDashboard(data.id);
+            } catch (err) {
+                console.error(err);
+                showToast("Ошибка сохранения: " + err.message);
+            }
+        }
+
+        // --- DASHBOARD ---
+        function renderDashboard(testId) {
+            const shareLink = `${window.location.origin}${window.location.pathname}?test=${testId}`;
+            appContainer.innerHTML = `
+                <div class="glass-card">
+                    <h2>Личный Кабинет</h2>
+                    <p class="subtitle">Автор: <strong>${state.currentUserNick}</strong></p>
+                    
+                    <div class="input-group">
+                        <label>Ссылка для друзей:</label>
+                        <div class="link-box">${shareLink}</div>
+                        <button class="btn btn-secondary" onclick="navigator.clipboard.writeText('${shareLink}').then(()=>showToast('Скопировано!'))">📋 Копировать</button>
+                    </div>
+
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+                    <h3>Результаты</h3>
+                    <div id="results-list"><p>Загрузка...</p></div>
+                    <button class="btn btn-secondary btn-small" style="margin-top:10px;" onclick="fetchResults('${testId}')">↻ Обновить</button>
+                    
+                    <button class="btn btn-danger" style="margin-top:20px;" onclick="location.reload()">Выйти</button>
+                </div>
+            `;
+            fetchResults(testId);
+        }
+
+        async function fetchResults(testId) {
+            const listEl = document.getElementById('results-list');
+            const { data, error } = await supabaseClient.from('xme_results').select('*').eq('test_id', testId).order('score', { ascending: false });
+            
+            if(error) { listEl.innerHTML = '<p style="color:red">Ошибка</p>'; return; }
+            if(!data || data.length === 0) { listEl.innerHTML = '<p style="color:var(--text-muted)">Пока пусто.</p>'; return; }
+
+            let html = '';
+            data.forEach(r => {
+                const pct = Math.round((r.score/r.total)*100);
+                html += `
+                <div class="result-item">
+                    <div class="friend-info">
+                        <span class="friend-name">${escapeHtml(r.friend_nick)}</span>
+                        <span class="score-text">${r.score}/${r.total} (${pct}%)</span>
+                    </div>
+                    <div class="mini-progress"><div class="mini-fill" style="width:${pct}%"></div></div>
+                </div>`;
+            });
+            listEl.innerHTML = html;
+        }
+
+        // --- FRIEND PLAY MODE ---
+        async function loadTestForFriend(testId) {
+            const { data, error } = await supabaseClient.from('xme_tests').select('*').eq('id', testId).single();
+            if(error || !data) { appContainer.innerHTML = '<div class="glass-card"><h2>Тест не найден</h2><button class="btn btn-primary" onclick="location.href=\'/?\'">Главная</button></div>'; return; }
+            
+            state.currentTestId = data.id;
+            state.creatorName = data.creator_nick;
+            state.playbackQuestions = data.questions_data; // Array of Q objects
+            
+            renderFriendIntro();
+        }
+
+        function renderFriendIntro() {
+            appContainer.innerHTML = `
+                <div class="glass-card">
+                    <h2>Знаешь ли ты<br><span style="color:#a855f7">${escapeHtml(state.creatorName)}</span>?</h2>
+                    <p class="subtitle">Ответь на ${state.playbackQuestions.length} вопросов.</p>
+                    <div class="input-group">
+                        <label>Твой никнейм</label>
+                        <input type="text" id="friend-nick" placeholder="Имя">
+                    </div>
+                    <button class="btn btn-primary" onclick="startFriendQuiz()">Старт</button>
+                </div>
+            `;
+        }
+
+        window.startFriendQuiz = () => {
+            const nick = document.getElementById('friend-nick').value.trim();
+            if(!nick) { showToast("Введи имя"); return; }
+            state.friendNick = nick;
+            state.userAnswers = {};
+            state.quizIndex = 0;
+            renderPlayQuestion();
+        };
+
+        function renderPlayQuestion() {
+            const idx = state.quizIndex;
+            const q = state.playbackQuestions[idx];
+            const progress = ((idx + 1) / state.playbackQuestions.length) * 100;
+
+            let optsHtml = '';
+            q.options.forEach((opt, i) => {
+                optsHtml += `<div class="option-btn" onclick="selectAnswer(${i})">${escapeHtml(opt.text)}</div>`;
+            });
+
+            appContainer.innerHTML = `
+                <div class="glass-card">
+                    <div class="progress-container"><div class="progress-bar" style="width:${progress}%"></div></div>
+                    <h2>${escapeHtml(q.text)}</h2>
+                    <div class="options-grid">${optsHtml}</div>
+                </div>
+            `;
+        }
+
+        window.selectAnswer = (choiceIndex) => {
+            state.userAnswers[state.quizIndex] = choiceIndex;
+            setTimeout(() => {
+                if(state.quizIndex < state.playbackQuestions.length - 1) {
+                    state.quizIndex++;
+                    renderPlayQuestion();
+                } else {
+                    calculateResult();
+                }
+            }, 300);
+        };
+
+        async function calculateResult() {
+            let score = 0;
+            const total = state.playbackQuestions.length;
+            
+            state.playbackQuestions.forEach((q, i) => {
+                if(state.userAnswers[i] === q.correctIndex) score++;
+            });
+
+            const pct = Math.round((score/total)*100);
+            let msg = pct <= 30 ? "Мы точно знакомы? 🤨" : pct <= 70 ? "Неплохо! 😉" : "Лучший друг! ❤️";
+
+            // Save
+            await supabaseClient.from('xme_results').insert([{
+                test_id: state.currentTestId,
+                friend_nick: state.friendNick,
+                score: score,
+                total: total
+            }]);
+
+            appContainer.innerHTML = `
+                <div class="glass-card" style="text-align:center;">
+                    <h1 style="font-size:3rem;">${pct}%</h1>
+                    <h2>${msg}</h2>
+                    <p>Правильных: ${score} из ${total}</p>
+                    <div style="height:10px; background:#222; border-radius:5px; margin:20px 0;"><div style="height:100%; width:${pct}%; background:var(--primary-gradient);"></div></div>
+                    <button class="btn btn-primary" onclick="location.href='/'">Создать свой тест</button>
+                </div>
+            `;
+        }
+
+        // --- INIT ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const testId = urlParams.get('test');
+        if(testId) loadTestForFriend(testId); else renderLanding();
+
+    </script>
+</body>
+</html>
