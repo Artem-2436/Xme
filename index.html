@@ -107,13 +107,25 @@
         /* Results List */
         .result-item {
             background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; margin-bottom: 10px;
-            display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border-color);
+            display: flex; flex-direction: column; border: 1px solid var(--border-color);
         }
+        .friend-header { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 10px; }
         .friend-info { display: flex; flex-direction: column; }
         .friend-name { font-weight: bold; font-size: 1.1rem; }
         .score-text { font-size: 0.85rem; color: var(--text-muted); }
         .mini-progress { width: 100px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
         .mini-fill { height: 100%; background: var(--success); }
+
+        /* Detailed Analysis Box */
+        .analysis-box {
+            background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; 
+            max-height: 200px; overflow-y: auto; font-size: 0.85rem;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .analysis-row { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .analysis-row:last-child { border-bottom: none; }
+        .ans-correct { color: #10b981; }
+        .ans-wrong { color: #ef4444; }
 
         /* Toast */
         #toast {
@@ -176,10 +188,11 @@
             currentUserNick: null,
             currentTestId: null,
             creatorPin: null,
-            tempQuestions: [], // Массив для конструктора
+            tempQuestions: [], // Массив для конструктора/редактора
             activeQuestionIndex: 0,
-            userAnswers: {},   // Ответы при прохождении
-            authorAnswers: []  // Правильные ответы автора (индексы)
+            userAnswers: {},   // Ответы при прохождении (индексы выбранных вариантов)
+            playbackQuestions: [], // Вопросы текущего теста для друга
+            friendNick: null
         };
 
         const appContainer = document.getElementById('app');
@@ -193,9 +206,14 @@
         }
 
         function escapeHtml(text) {
+            if (!text) return "";
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function deepCopy(obj) {
+            return JSON.parse(JSON.stringify(obj));
         }
 
         // --- RENDER LANDING ---
@@ -220,56 +238,53 @@
         }
 
         async function checkLoginOrCreate() {
-    const nick = document.getElementById('login-nick').value.trim();
-    const pin = document.getElementById('login-pin').value.trim();
+            const nick = document.getElementById('login-nick').value.trim();
+            const pin = document.getElementById('login-pin').value.trim();
 
-    if (!nick || !pin || pin.length !== 4) {
-        showToast("Заполните все поля корректно");
-        return;
-    }
-
-    try {
-        // Используем select().eq(), но НЕ .single(). Получаем массив.
-        const { data, error } = await supabaseClient
-            .from('xme_tests')
-            .select('*')
-            .eq('creator_nick', nick); 
-
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-            // Пользователь найден
-            const user = data[0];
-            if (user.secret_pin === pin) {
-                state.currentTestId = user.id;
-                // Сохраняем структуру вопросов для сравнения позже
-                state.authorQuestions = user.questions_data; 
-                renderDashboard(user.id);
-            } else {
-                showToast("Неверный PIN!");
+            if (!nick || !pin || pin.length !== 4) {
+                showToast("Заполните все поля корректно");
+                return;
             }
-        } else {
-            // Пользователя нет -> Начинаем создание
-            state.currentUserNick = nick;
-            state.creatorPin = pin;
-            state.tempQuestions = [];
-            renderBuilderStep(0);
+
+            try {
+                const { data, error } = await supabaseClient
+                    .from('xme_tests')
+                    .select('*')
+                    .eq('creator_nick', nick); 
+
+                if (error) throw error;
+
+                if (data && data.length > 0) {
+                    const user = data[0];
+                    if (user.secret_pin === pin) {
+                        state.currentTestId = user.id;
+                        state.currentUserNick = user.creator_nick;
+                        // Load questions for editing
+                        state.tempQuestions = deepCopy(user.questions_data); 
+                        renderDashboard(user.id);
+                    } else {
+                        showToast("Неверный PIN!");
+                    }
+                } else {
+                    state.currentUserNick = nick;
+                    state.creatorPin = pin;
+                    state.tempQuestions = [];
+                    renderBuilderStep(0);
+                }
+            } catch (err) {
+                console.error("Full Error:", err);
+                showToast("Ошибка БД: " + (err.message || "Unknown"));
+            }
         }
-    } catch (err) {
-        console.error("Full Error:", err);
-        // Если ошибка сети или другая, показываем текст
-        showToast("Ошибка БД: " + (err.message || "Unknown"));
-    }
-}
-        // --- BUILDER LOGIC (Constructor) ---
+
+        // --- BUILDER LOGIC (Create & Edit) ---
         function renderBuilderStep(index) {
             state.activeQuestionIndex = index;
             
-            // Initialize new question object if doesn't exist
             if (!state.tempQuestions[index]) {
                 state.tempQuestions[index] = {
                     text: "",
-                    options: [{ text: "", isCorrect: false }, { text: "", isCorrect: false }], // Min 2 options initially
+                    options: [{ text: "", isCorrect: false }, { text: "", isCorrect: false }],
                     correctIndex: 0
                 };
             }
@@ -287,10 +302,14 @@
                 `;
             });
 
+            const isEditing = !!state.currentTestId;
+            const title = isEditing ? `Редактор Вопроса ${index + 1}` : `Конструктор Вопроса ${index + 1}`;
+            const subtitle = isEditing ? "Измените вопрос и сохраните." : "Максимум 15 вопросов.";
+
             appContainer.innerHTML = `
                 <div class="glass-card">
-                    <h2>Конструктор Вопроса ${index + 1}</h2>
-                    <p class="subtitle">Максимум 15 вопросов. Отметьте правильный ответ галочкой.</p>
+                    <h2>${title}</h2>
+                    <p class="subtitle">${subtitle}</p>
                     
                     <div class="input-group">
                         <label>Текст вопроса</label>
@@ -333,7 +352,6 @@
                 return;
             }
             state.tempQuestions[idx].options.splice(optIdx, 1);
-            // Recalculate correct index if removed
             if(state.tempQuestions[idx].correctIndex === optIdx) {
                 state.tempQuestions[idx].correctIndex = 0;
                 state.tempQuestions[idx].options[0].isCorrect = true;
@@ -362,39 +380,52 @@
         };
 
         async function finishBuilder() {
-            // Validate final list
             const validQuestions = state.tempQuestions.filter(q => q.text && q.options.length > 0);
             if(validQuestions.length === 0) { showToast("Нет вопросов!"); return; }
 
             try {
-                const { data, error } = await supabaseClient
-                    .from('xme_tests')
-                    .insert([{
-                        creator_nick: state.currentUserNick,
-                        secret_pin: state.creatorPin,
-                        questions_data: validQuestions
-                    }])
-                    .select()
-                    .single();
+                if (state.currentTestId) {
+                    // UPDATE EXISTING TEST
+                    const { error } = await supabaseClient
+                        .from('xme_tests')
+                        .update({ questions_data: validQuestions })
+                        .eq('id', state.currentTestId);
+                    
+                    if (error) throw error;
+                    showToast("Тест обновлен!");
+                    renderDashboard(state.currentTestId);
+                } else {
+                    // CREATE NEW TEST
+                    const { data, error } = await supabaseClient
+                        .from('xme_tests')
+                        .insert([{
+                            creator_nick: state.currentUserNick,
+                            secret_pin: state.creatorPin,
+                            questions_data: validQuestions
+                        }])
+                        .select()
+                        .single();
 
-                if (error) throw error;
-                
-                showToast("Тест создан!");
-                state.currentTestId = data.id;
-                renderDashboard(data.id);
+                    if (error) throw error;
+                    
+                    showToast("Тест создан!");
+                    state.currentTestId = data.id;
+                    renderDashboard(data.id);
+                }
             } catch (err) {
                 console.error(err);
                 showToast("Ошибка сохранения: " + err.message);
             }
         }
 
-        // --- DASHBOARD ---
+        // --- DASHBOARD WITH EDITING & RESULTS ANALYSIS ---
         function renderDashboard(testId) {
             const shareLink = `${window.location.origin}${window.location.pathname}?test=${testId}`;
+            
             appContainer.innerHTML = `
                 <div class="glass-card">
                     <h2>Личный Кабинет</h2>
-                    <p class="subtitle">Автор: <strong>${state.currentUserNick}</strong></p>
+                    <p class="subtitle">Автор: <strong>${escapeHtml(state.currentUserNick)}</strong></p>
                     
                     <div class="input-group">
                         <label>Ссылка для друзей:</label>
@@ -404,9 +435,13 @@
 
                     <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
 
-                    <h3>Результаты</h3>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                        <h3>Результаты участников</h3>
+                        <button class="btn btn-primary btn-small" onclick="openEditMode()">✏️ Редактировать тест</button>
+                    </div>
+                    
                     <div id="results-list"><p>Загрузка...</p></div>
-                    <button class="btn btn-secondary btn-small" style="margin-top:10px;" onclick="fetchResults('${testId}')">↻ Обновить</button>
+                    <button class="btn btn-secondary btn-small" style="margin-top:10px;" onclick="fetchResults('${testId}')">↻ Обновить список</button>
                     
                     <button class="btn btn-danger" style="margin-top:20px;" onclick="location.reload()">Выйти</button>
                 </div>
@@ -414,36 +449,80 @@
             fetchResults(testId);
         }
 
+        window.openEditMode = () => {
+            if(state.tempQuestions.length === 0) {
+                showToast("Нет данных для редактирования. Перезайдите.");
+                return;
+            }
+            renderBuilderStep(0);
+        };
+
         async function fetchResults(testId) {
             const listEl = document.getElementById('results-list');
-            const { data, error } = await supabaseClient.from('xme_results').select('*').eq('test_id', testId).order('score', { ascending: false });
+            // Select answers_data as well now
+            const { data, error } = await supabaseClient.from('xme_results').select('*').eq('test_id', testId).order('created_at', { ascending: false });
             
-            if(error) { listEl.innerHTML = '<p style="color:red">Ошибка</p>'; return; }
-            if(!data || data.length === 0) { listEl.innerHTML = '<p style="color:var(--text-muted)">Пока пусто.</p>'; return; }
+            if(error) { listEl.innerHTML = '<p style="color:red">Ошибка загрузки результатов</p>'; return; }
+            if(!data || data.length === 0) { listEl.innerHTML = '<p style="color:var(--text-muted)">Пока никто не прошел тест.</p>'; return; }
 
             let html = '';
             data.forEach(r => {
                 const pct = Math.round((r.score/r.total)*100);
+                
+                // Generate detailed breakdown string
+                let detailsHtml = '';
+                if (r.answers_data && Array.isArray(r.answers_data)) {
+                    r.answers_data.forEach((ansIdx, qIdx) => {
+                        // Find the correct answer for this question from our local state (current test definition)
+                        let qData = state.tempQuestions[qIdx];
+                        
+                        if (qData) {
+                            const isCorrect = ansIdx === qData.correctIndex;
+                            const statusClass = isCorrect ? 'ans-correct' : 'ans-wrong';
+                            const icon = isCorrect ? '✅' : '❌';
+                            const userChoice = qData.options[ansIdx] ? qData.options[ansIdx].text : "?";
+                            const correctChoice = qData.options[qData.correctIndex] ? qData.options[qData.correctIndex].text : "?";
+                            
+                            detailsHtml += `
+                                <div class="analysis-row">
+                                    <span class="${statusClass}">${icon}</span> Q${qIdx+1}: Выбрано "<em>${escapeHtml(userChoice)}</em>". Верно: "<strong>${escapeHtml(correctChoice)}</strong>"
+                                </div>
+                            `;
+                        }
+                    });
+                } else {
+                    detailsHtml = '<p style="color:#666;">Нет данных о деталях (старый результат?)</p>';
+                }
+
                 html += `
                 <div class="result-item">
-                    <div class="friend-info">
-                        <span class="friend-name">${escapeHtml(r.friend_nick)}</span>
-                        <span class="score-text">${r.score}/${r.total} (${pct}%)</span>
+                    <div class="friend-header">
+                        <div class="friend-info">
+                            <span class="friend-name">${escapeHtml(r.friend_nick)}</span>
+                            <span class="score-text">${r.score}/${r.total} (${pct}%)</span>
+                        </div>
+                        <div class="mini-progress"><div class="mini-fill" style="width:${pct}%"></div></div>
                     </div>
-                    <div class="mini-progress"><div class="mini-fill" style="width:${pct}%"></div></div>
+                    <div class="analysis-box">
+                        <strong style="font-size:0.8rem; color:#aaa;">Детали ответов:</strong>
+                        ${detailsHtml}
+                    </div>
                 </div>`;
             });
             listEl.innerHTML = html;
         }
 
-        // --- FRIEND PLAY MODE ---
+        // --- FRIEND PLAY MODE (Updated to save answers_data and show errors) ---
         async function loadTestForFriend(testId) {
             const { data, error } = await supabaseClient.from('xme_tests').select('*').eq('id', testId).single();
-            if(error || !data) { appContainer.innerHTML = '<div class="glass-card"><h2>Тест не найден</h2><button class="btn btn-primary" onclick="location.href=\'/?\'">Главная</button></div>'; return; }
+            if(error || !data) { 
+                appContainer.innerHTML = '<div class="glass-card"><h2>Тест не найден</h2><button class="btn btn-primary" onclick="location.href=\'/?\'">Главная</button></div>'; 
+                return; 
+            }
             
             state.currentTestId = data.id;
             state.creatorName = data.creator_nick;
-            state.playbackQuestions = data.questions_data; // Array of Q objects
+            state.playbackQuestions = data.questions_data; 
             
             renderFriendIntro();
         }
@@ -505,29 +584,70 @@
         async function calculateResult() {
             let score = 0;
             const total = state.playbackQuestions.length;
-            
+            const answersArray = []; // Store raw indices for DB
+
             state.playbackQuestions.forEach((q, i) => {
-                if(state.userAnswers[i] === q.correctIndex) score++;
+                const userAns = state.userAnswers[i];
+                answersArray.push(userAns !== undefined ? userAns : -1); // Handle missing answers safely
+                
+                if(userAns === q.correctIndex) score++;
             });
 
             const pct = Math.round((score/total)*100);
             let msg = pct <= 30 ? "Мы точно знакомы? 🤨" : pct <= 70 ? "Неплохо! 😉" : "Лучший друг! ❤️";
 
-            // Save
-            await supabaseClient.from('xme_results').insert([{
-                test_id: state.currentTestId,
-                friend_nick: state.friendNick,
-                score: score,
-                total: total
-            }]);
+            // Save result INCLUDING answers_array
+            try {
+                const { error } = await supabaseClient.from('xme_results').insert([{
+                    test_id: state.currentTestId,
+                    friend_nick: state.friendNick,
+                    score: score,
+                    total: total,
+                    answers_data: answersArray // New field
+                }]);
+                
+                if (error) throw error;
+            } catch(e) {
+                console.warn("Could not save detailed results, saving basic...", e);
+                showToast("Ошибка сохранения деталей. Результат записан без анализа.");
+            }
+
+            // Show Result with Details to Friend
+            renderFriendResult(score, total, pct, msg, answersArray);
+        }
+
+        function renderFriendResult(score, total, pct, msg, answersArray) {
+            let detailsHtml = '';
+            state.playbackQuestions.forEach((q, i) => {
+                const userAnsIdx = answersArray[i];
+                const isCorrect = userAnsIdx === q.correctIndex;
+                const statusClass = isCorrect ? 'ans-correct' : 'ans-wrong';
+                const icon = isCorrect ? '✅' : '❌';
+                const userChoice = q.options[userAnsIdx] ? q.options[userAnsIdx].text : "Не отвечено";
+                const correctChoice = q.options[q.correctIndex] ? q.options[q.correctIndex].text : "?";
+                
+                detailsHtml += `
+                    <div class="analysis-row">
+                        <span class="${statusClass}">${icon}</span> Q${i+1}: "${escapeHtml(q.text)}"<br>
+                        Ваш выбор: <em>${escapeHtml(userChoice)}</em>. Правильно: <strong>${escapeHtml(correctChoice)}</strong>
+                    </div>
+                `;
+            });
 
             appContainer.innerHTML = `
-                <div class="glass-card" style="text-align:center;">
-                    <h1 style="font-size:3rem;">${pct}%</h1>
-                    <h2>${msg}</h2>
-                    <p>Правильных: ${score} из ${total}</p>
-                    <div style="height:10px; background:#222; border-radius:5px; margin:20px 0;"><div style="height:100%; width:${pct}%; background:var(--primary-gradient);"></div></div>
-                    <button class="btn btn-primary" onclick="location.href='https://artem-2436.github.io/Xme/'">Создать свой тест</button>
+                <div class="glass-card" style="text-align:left;">
+                    <div style="text-align:center; margin-bottom:20px;">
+                        <h1 style="font-size:3rem;">${pct}%</h1>
+                        <h2>${msg}</h2>
+                        <p>Правильных: ${score} из ${total}</p>
+                    </div>
+                    
+                    <div class="analysis-box" style="max-height:none;">
+                        <strong style="font-size:1rem; color:white; display:block; margin-bottom:10px;">Разбор ошибок:</strong>
+                        ${detailsHtml}
+                    </div>
+
+                    <button class="btn btn-primary" style="margin-top:20px;" onclick="location.href='https://artem-2436.github.io/Xme/'">Создать свой тест</button>
                 </div>
             `;
         }
