@@ -67,7 +67,7 @@
         /* Inputs & Buttons */
         .input-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: var(--text-muted); }
-        input[type="text"], input[type="password"], textarea {
+        input[type="text"], input[type="text"], textarea {
             width: 100%; padding: 12px 15px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color);
             border-radius: 12px; color: white; font-size: 1rem; outline: none; transition: 0.2s; resize: vertical;
         }
@@ -229,7 +229,7 @@
                     </div>
                     <div class="input-group">
                         <label>PIN-код (4 цифры)</label>
-                        <input type="password" id="login-pin" placeholder="****" pattern="[0-9]{4}" maxlength="4">
+                        <input type="text" id="login-pin" placeholder="****" pattern="[0-9]{4}" maxlength="4">
                     </div>
                     
                     <button class="btn btn-primary" onclick="checkLoginOrCreate()">Войти / Создать тест</button>
